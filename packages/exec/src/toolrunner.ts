@@ -84,7 +84,7 @@ export class ToolRunner extends events.EventEmitter {
     data: Buffer,
     strBuffer: string,
     onLine: (line: string) => void
-  ): void {
+  ): string {
     try {
       let s = strBuffer + data.toString()
       let n = s.indexOf(os.EOL)
@@ -98,10 +98,12 @@ export class ToolRunner extends events.EventEmitter {
         n = s.indexOf(os.EOL)
       }
 
-      strBuffer = s
+      return s
     } catch (err) {
       // streaming lines to console is best effort.  Don't fail a build.
       this._debug(`error processing line. Failed with error ${err}`)
+
+      return ''
     }
   }
 
@@ -414,7 +416,7 @@ export class ToolRunner extends events.EventEmitter {
     // otherwise verify it exists (add extension on Windows if necessary)
     this.toolPath = await io.which(this.toolPath, true)
 
-    return new Promise<number>((resolve, reject) => {
+    return new Promise<number>(async (resolve, reject) => {
       this._debug(`exec tool: ${this.toolPath}`)
       this._debug('arguments:')
       for (const arg of this.args) {
@@ -433,6 +435,10 @@ export class ToolRunner extends events.EventEmitter {
         this._debug(message)
       })
 
+      if (this.options.cwd && !(await ioUtil.exists(this.options.cwd))) {
+        return reject(new Error(`The cwd: ${this.options.cwd} does not exist!`))
+      }
+
       const fileName = this._getSpawnFileName()
       const cp = child.spawn(
         fileName,
@@ -440,7 +446,7 @@ export class ToolRunner extends events.EventEmitter {
         this._getSpawnOptions(this.options, fileName)
       )
 
-      const stdbuffer = ''
+      let stdbuffer = ''
       if (cp.stdout) {
         cp.stdout.on('data', (data: Buffer) => {
           if (this.options.listeners && this.options.listeners.stdout) {
@@ -451,15 +457,19 @@ export class ToolRunner extends events.EventEmitter {
             optionsNonNull.outStream.write(data)
           }
 
-          this._processLineBuffer(data, stdbuffer, (line: string) => {
-            if (this.options.listeners && this.options.listeners.stdline) {
-              this.options.listeners.stdline(line)
+          stdbuffer = this._processLineBuffer(
+            data,
+            stdbuffer,
+            (line: string) => {
+              if (this.options.listeners && this.options.listeners.stdline) {
+                this.options.listeners.stdline(line)
+              }
             }
-          })
+          )
         })
       }
 
-      const errbuffer = ''
+      let errbuffer = ''
       if (cp.stderr) {
         cp.stderr.on('data', (data: Buffer) => {
           state.processStderr = true
@@ -478,11 +488,15 @@ export class ToolRunner extends events.EventEmitter {
             s.write(data)
           }
 
-          this._processLineBuffer(data, errbuffer, (line: string) => {
-            if (this.options.listeners && this.options.listeners.errline) {
-              this.options.listeners.errline(line)
+          errbuffer = this._processLineBuffer(
+            data,
+            errbuffer,
+            (line: string) => {
+              if (this.options.listeners && this.options.listeners.errline) {
+                this.options.listeners.errline(line)
+              }
             }
-          })
+          )
         })
       }
 
@@ -615,13 +629,13 @@ class ExecState extends events.EventEmitter {
     }
   }
 
-  processClosed: boolean = false // tracks whether the process has exited and stdio is closed
-  processError: string = ''
-  processExitCode: number = 0
-  processExited: boolean = false // tracks whether the process has exited
-  processStderr: boolean = false // tracks whether stderr was written to
+  processClosed = false // tracks whether the process has exited and stdio is closed
+  processError = ''
+  processExitCode = 0
+  processExited = false // tracks whether the process has exited
+  processStderr = false // tracks whether stderr was written to
   private delay = 10000 // 10 seconds
-  private done: boolean = false
+  private done = false
   private options: im.ExecOptions
   private timeout: NodeJS.Timer | null = null
   private toolPath: string

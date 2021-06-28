@@ -1,9 +1,11 @@
+import {ok} from 'assert'
 import * as childProcess from 'child_process'
 import * as path from 'path'
 import {promisify} from 'util'
 import * as ioUtil from './io-util'
 
 const exec = promisify(childProcess.exec)
+const execFile = promisify(childProcess.execFile)
 
 /**
  * Interface for cp/mv options
@@ -13,6 +15,8 @@ export interface CopyOptions {
   recursive?: boolean
   /** Optional. Whether to overwrite existing files in the destination. Defaults to true */
   force?: boolean
+  /** Optional. Whether to copy the source directory along with all the files. Only takes effect when recursive=true and copying a directory. Default is true*/
+  copySourceDirectory?: boolean
 }
 
 /**
@@ -36,7 +40,7 @@ export async function cp(
   dest: string,
   options: CopyOptions = {}
 ): Promise<void> {
-  const {force, recursive} = readCopyOptions(options)
+  const {force, recursive, copySourceDirectory} = readCopyOptions(options)
 
   const destStat = (await ioUtil.exists(dest)) ? await ioUtil.stat(dest) : null
   // Dest is an existing file, but not forcing
@@ -46,7 +50,7 @@ export async function cp(
 
   // If dest is an existing directory, should copy inside.
   const newDest: string =
-    destStat && destStat.isDirectory()
+    destStat && destStat.isDirectory() && copySourceDirectory
       ? path.join(dest, path.basename(source))
       : dest
 
@@ -114,11 +118,24 @@ export async function rmRF(inputPath: string): Promise<void> {
   if (ioUtil.IS_WINDOWS) {
     // Node doesn't provide a delete operation, only an unlink function. This means that if the file is being used by another
     // program (e.g. antivirus), it won't be deleted. To address this, we shell out the work to rd/del.
+
+    // Check for invalid characters
+    // https://docs.microsoft.com/en-us/windows/win32/fileio/naming-a-file
+    if (/[*"<>|]/.test(inputPath)) {
+      throw new Error(
+        'File path must not contain `*`, `"`, `<`, `>` or `|` on Windows'
+      )
+    }
     try {
+      const cmdPath = ioUtil.getCmdPath()
       if (await ioUtil.isDirectory(inputPath, true)) {
-        await exec(`rd /s /q "${inputPath}"`)
+        await exec(`${cmdPath} /s /c "rd /s /q "%inputPath%""`, {
+          env: {inputPath}
+        })
       } else {
-        await exec(`del /f /a "${inputPath}"`)
+        await exec(`${cmdPath} /s /c "del /f /a "%inputPath%""`, {
+          env: {inputPath}
+        })
       }
     } catch (err) {
       // if you try to delete a file that doesn't exist, desired result is achieved
@@ -146,7 +163,7 @@ export async function rmRF(inputPath: string): Promise<void> {
     }
 
     if (isDir) {
-      await exec(`rm -rf "${inputPath}"`)
+      await execFile(`rm`, [`-rf`, `${inputPath}`])
     } else {
       await ioUtil.unlink(inputPath)
     }
@@ -161,7 +178,8 @@ export async function rmRF(inputPath: string): Promise<void> {
  * @returns Promise<void>
  */
 export async function mkdirP(fsPath: string): Promise<void> {
-  await ioUtil.mkdirP(fsPath)
+  ok(fsPath, 'a path argument must be provided')
+  await ioUtil.mkdir(fsPath, {recursive: true})
 }
 
 /**
@@ -276,7 +294,11 @@ export async function findInPath(tool: string): Promise<string[]> {
 function readCopyOptions(options: CopyOptions): Required<CopyOptions> {
   const force = options.force == null ? true : options.force
   const recursive = Boolean(options.recursive)
-  return {force, recursive}
+  const copySourceDirectory =
+    options.copySourceDirectory == null
+      ? true
+      : Boolean(options.copySourceDirectory)
+  return {force, recursive, copySourceDirectory}
 }
 
 async function cpDirRecursive(

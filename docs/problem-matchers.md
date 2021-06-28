@@ -110,6 +110,16 @@ The eslint-stylish problem matcher defined below catches that output, and create
 The first pattern matches the `test.js` line and records the file information. This line is not decorated in the UI.
 The second pattern loops through the remaining lines with `loop: true` until it fails to find a match, and surfaces these lines prominently in the UI.
 
+Note that the pattern matches must be on consecutive lines. The following would not result in any match findings.
+
+```
+test.js
+  extraneous log line of no interest
+  1:0   error  Missing "use strict" statement                 strict
+  5:10  error  'addOne' is defined but never used             no-unused-vars
+✖ 2 problems (2 errors, 0 warnings)
+```
+
 ## Adding and Removing Problem Matchers
 
 Problem Matchers are enabled and removed via the toolkit [commands](commands.md#problem-matchers).
@@ -134,6 +144,6 @@ Use ECMAScript regular expression syntax when testing patterns.
 
 ### File property getting dropped
 
-[Enable debug logging](https://help.github.com/en/actions/configuring-and-managing-workflows/managing-a-workflow-run#enabling-debug-logging) to determine why the file is getting dropped.
+[Enable debug logging](https://docs.github.com/en/actions/managing-workflow-runs/enabling-debug-logging) to determine why the file is getting dropped.
 
 This usually happens when the file does not exist or is not under the workflow repo.
